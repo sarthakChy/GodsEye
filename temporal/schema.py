@@ -4,8 +4,10 @@ from typing import List, Optional
 @dataclass
 class FrameRelation:
     subject_id: str          # "person_01"
+    subject_idx: int         # 0
     predicate: str           # "holding"
     object_id: str           # "laptop_01"
+    object_idx: int          # 1
     logit: float             # Raw log-odds (for belief filter)
     score: float             # Calibrated probability (for display)
     timestamp: float         # seconds

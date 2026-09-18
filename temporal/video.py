@@ -78,3 +78,23 @@ class VideoLoader:
             
             yield frame_idx, timestamp_sec, frame_array
             frame_idx += 1
+            
+    def get_frame(self, timestamp_sec: float) -> np.ndarray:
+        """Seek to a precise timestamp and extract a single frame with identical preprocessing."""
+        W = self.metadata["target_w"]
+        H = self.metadata["target_h"]
+        vf = _get_vf_args(W, H)
+        
+        # We don't need fps resampling for a single frame
+        op = ["-vf", vf, "-vframes", "1"]
+        ip = ["-ss", str(timestamp_sec)]
+        
+        gen = imageio_ffmpeg.read_frames(self.path, pix_fmt="bgr24", input_params=ip, output_params=op)
+        next(gen) # Skip meta
+        
+        try:
+            buf = next(gen)
+            frame_array = np.frombuffer(buf, np.uint8).reshape(H, W, 3)
+            return frame_array
+        except StopIteration:
+            return np.zeros((H, W, 3), dtype=np.uint8)

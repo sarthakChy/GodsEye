@@ -18,6 +18,7 @@ class DashboardState:
         self.tsg = None
         self.events = None
         self.run_dir = None
+        self.video_loader = None
         
 STATE = DashboardState()
 
@@ -42,30 +43,54 @@ def load_run(run_name):
         STATE.events = [TemporalRelation(**d) for d in events_dict]
         
     total_frames = STATE.manifest.get("total_frames", len(STATE.manifest["frames"]))
+    sample_fps = STATE.manifest.get("sample_fps", 2.0)
     
-    # Return updates for the UI
-    timeline_fig = render_timeline(STATE.events, total_frames / 2.0) # Assumes 2 FPS roughly
+    # Initialize VideoLoader for scrubbing
+    from temporal.video import VideoLoader
+    STATE.video_loader = VideoLoader(STATE.manifest["video_path"], sample_fps=sample_fps)
     
-    return gr.Slider(minimum=0, maximum=total_frames-1, value=0, step=1, interactive=True), timeline_fig
+    video_duration = total_frames / sample_fps if sample_fps > 0 else 0
+    timeline_fig = render_timeline(STATE.events, video_duration)
+    
+    slider_update = gr.Slider(minimum=0, maximum=total_frames-1, value=0, step=1, interactive=True)
+    
+    # Force initial frame render so UI doesn't look broken
+    initial_img, initial_sg = update_frame(0)
+    
+    return slider_update, timeline_fig, initial_img, initial_sg
     
 def update_frame(frame_idx):
-    if not STATE.manifest:
+    if not STATE.manifest or not STATE.video_loader:
         return None, None
         
     frame_info = STATE.manifest["frames"][frame_idx]
-    frame_path = STATE.run_dir / "frames" / frame_info["file"]
+    ts = frame_info["ts"]
     
-    img = cv2.imread(str(frame_path))
+    # Get frame using imageio_ffmpeg for deterministic resizing
+    img = STATE.video_loader.get_frame(ts)
     if img is not None:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     
     # Query graph
-    ts = frame_info["ts"]
     subgraph = STATE.tsg.query_time(ts)
     
-    # We could render overlay here if we saved bounding boxes, 
-    # but we didn't save bounding boxes per frame in process_video.py!
-    # For Sprint 3, we just show the raw frame and the Plotly graph.
+    # Extract active relations for the overlay
+    active_rels = []
+    for u, v, d in subgraph.edges(data=True):
+        active_rels.append({
+            "subject": u,
+            "object": v,
+            "predicate": d.get("predicate", "")
+        })
+        
+    # Render overlay using the stored boxes from manifest
+    boxes = np.array(frame_info.get("boxes", []))
+    det2semantic = frame_info.get("det2semantic", {})
+    # JSON dict keys are strings, convert to int
+    det2semantic = {int(k): v for k, v in det2semantic.items()}
+    
+    if len(boxes) > 0 and img is not None:
+        img = render_overlay(img, boxes, det2semantic, active_rels)
     
     sg_fig = render_graph(subgraph)
     
@@ -92,5 +117,5 @@ def build_godseye_ui():
         
     # Wiring
     refresh_btn.click(lambda: gr.Dropdown(choices=list_runs()), None, run_dropdown)
-    run_dropdown.change(load_run, inputs=[run_dropdown], outputs=[frame_slider, timeline])
+    run_dropdown.change(load_run, inputs=[run_dropdown], outputs=[frame_slider, timeline, video_frame, scene_graph])
     frame_slider.change(update_frame, inputs=[frame_slider], outputs=[video_frame, scene_graph])

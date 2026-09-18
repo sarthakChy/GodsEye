@@ -10,6 +10,8 @@ VALIDATED_VOCABULARY = sorted(set(_default_predicates()) | set(DEFAULT_PREDICATE
 _EXCLUDE = {"outside", "approaching", "moving away from", "picking up", "putting down"}
 VALIDATED_VOCABULARY = [p for p in VALIDATED_VOCABULARY if p not in _EXCLUDE]
 
+HEURISTIC_VOCABULARY = ["approaching", "moving away from"]
+
 def compute_motion(centroid_a_old: np.ndarray, centroid_a_new: np.ndarray, 
                    centroid_b_old: np.ndarray, centroid_b_new: np.ndarray) -> str | None:
     """Distance-based heuristic for motion predicates.
@@ -26,5 +28,5 @@ def compute_motion(centroid_a_old: np.ndarray, centroid_a_new: np.ndarray,
     if dist_new < dist_old * 0.7:
         return "approaching"
     if dist_new > dist_old * 1.3:
-        return "moving_away"
+        return "moving away from"
     return None

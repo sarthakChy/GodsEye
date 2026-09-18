@@ -71,7 +71,7 @@ class TemporalAggregator:
         # It just needs hashable IDs.
         
         # Wait, the edge_book expects det2track to map det_idx -> track_id. We pass det_idx -> semantic_id.
-        is_spatial = [False] * len(triplets) # Simplification, but actually we should know this
+        is_spatial = {} # EdgeBook looks up is_spatial.get(t.predicate, False)
         
         # Call observe
         self.edge_book.observe(triplets, det2track, is_spatial, raw=raw)

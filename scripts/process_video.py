@@ -52,16 +52,13 @@ def main():
     
     relations_log = open(out_dir / "relations.jsonl", "w")
     manifest = {
-        "video_path": args.video,
+        "video_path": os.path.abspath(args.video),
+        "sample_fps": config.video.sample_fps,
         "metadata": loader.metadata,
         "frames": []
     }
     
     for frame_idx, timestamp, frame in tqdm(loader.stream_frames()):
-        # Save frame
-        frame_path = frames_dir / f"frame_{frame_idx:06d}.jpg"
-        cv2.imwrite(str(frame_path), frame)
-        manifest["frames"].append({"idx": frame_idx, "ts": timestamp, "file": frame_path.name})
         
         # 1. Detect
         H, W = frame.shape[:2]
@@ -81,6 +78,14 @@ def main():
         # We need semantic_ids for active tracks
         active_semantic_ids = set(det2semantic.values())
         
+        # Save manifest entry with tracking data for the UI
+        manifest["frames"].append({
+            "idx": frame_idx, 
+            "ts": timestamp, 
+            "boxes": boxes.tolist(), 
+            "det2semantic": {int(k): v for k, v in det2semantic.items()}
+        })
+        
         # 3. Extract Relations (includes raw logits)
         frame_rels, logits_np, pair_np, kof = extractor.extract(
             frame, boxes, det2semantic, timestamp, frame_idx
@@ -92,25 +97,26 @@ def main():
             
         class MockTriplet:
             def __init__(self, s, o, p, sc):
-                self.sub = s
-                self.obj = o
-                self.pred = p
+                self.subject_idx = s
+                self.object_idx = o
+                self.predicate = p
                 self.score = sc
                 
         # Format triplets for EdgeBook. EdgeBook expects subject_idx, object_idx, etc.
-        # But we adapted it to use semantic IDs. We just need an object with sub, obj, pred, score
         mock_triplets = []
         for rel in frame_rels:
-            mock_triplets.append(MockTriplet(rel.subject_id, rel.object_id, rel.predicate, rel.score))
+            mock_triplets.append(MockTriplet(rel.subject_idx, rel.object_idx, rel.predicate, rel.score))
             
         # 4. Temporal Aggregation
+        vidx = {v: i for i, v in enumerate(extractor.vocab)}
+        contract = extractor.ra.contract
         aggregator.observe_frame(
             frame_idx=frame_idx,
             timestamp=timestamp,
             triplets=mock_triplets,
             det2track=det2semantic,
             active_tracks_ids=active_semantic_ids,
-            raw=(logits_np, pair_np, kof)
+            raw=(logits_np, pair_np, kof, contract, vidx)
         )
 
     relations_log.close()

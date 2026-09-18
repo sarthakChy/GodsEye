@@ -96,8 +96,10 @@ class RelationExtractor:
                 logit_val = float((logits_np[k] + pair_np[k])[p])
                 relations.append(FrameRelation(
                     subject_id=sub_id,
+                    subject_idx=si,
                     predicate=pred,
                     object_id=obj_id,
+                    object_idx=oi,
                     logit=logit_val,
                     score=s,
                     timestamp=timestamp,

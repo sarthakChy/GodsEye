@@ -19,11 +19,11 @@ def render_graph(G: nx.MultiDiGraph) -> go.Figure:
     for u, v, data in G.edges(data=True):
         x0, y0 = pos[u]
         x1, y1 = pos[v]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
+        edge_x.extend([float(x0), float(x1), None])
+        edge_y.extend([float(y0), float(y1), None])
         
-        mid_x.append((x0 + x1) / 2)
-        mid_y.append((y0 + y1) / 2)
+        mid_x.append(float((x0 + x1) / 2))
+        mid_y.append(float((y0 + y1) / 2))
         edge_text.append(data.get("predicate", ""))
         
     edge_trace = go.Scatter(
@@ -47,8 +47,8 @@ def render_graph(G: nx.MultiDiGraph) -> go.Figure:
     node_text = []
     for node in G.nodes():
         x, y = pos[node]
-        node_x.append(x)
-        node_y.append(y)
+        node_x.append(float(x))
+        node_y.append(float(y))
         node_text.append(str(node))
 
     node_trace = go.Scatter(

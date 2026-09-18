@@ -31,12 +31,12 @@ def render_timeline(relations: List[TemporalRelation], video_duration: float) ->
     fig = go.Figure()
     for pred, group in df.groupby("Predicate"):
         fig.add_trace(go.Bar(
-            y=group["Pair"],
-            x=group["Duration"],
-            base=group["Start"],
+            y=list(group["Pair"]),
+            x=list(group["Duration"]),
+            base=list(group["Start"]),
             name=pred,
             orientation='h',
-            text=group["Predicate"],
+            text=list(group["Predicate"]),
             textposition='inside'
         ))
         

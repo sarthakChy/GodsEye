@@ -58,3 +58,6 @@ main.pdf
 # GodsEye temporal pipeline outputs
 outputs/
 data/videos/
+
+# Local test videos
+test - videos/
