@@ -55,6 +55,7 @@ release = ["huggingface_hub~=1.23"]
 # scikit-learn: the SpatialSense (A6) metrics in relsgg/spatialsense_metrics.py,
 # used by benchmark/eval_spatialsense.py and the OvSGTR interchange scorer.
 dev = ["pytest~=8.0", "black", "isort", "scikit-learn~=1.9"]
+temporal = ["lap>=0.4", "networkx>=3.1", "plotly>=5.17", "imageio-ffmpeg>=0.5"]
 
 [project.urls]
 Homepage = "https://maelic.github.io/RelateAnythingProject"
@@ -65,7 +66,7 @@ Models = "https://huggingface.co/collections/maelic/relateanything"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["relsgg", "relsgg.*"]
+include = ["relsgg", "relsgg.*", "temporal", "temporal.*"]
 
 [tool.setuptools.package-data]
 relsgg = ["corpus_type_map.json"]
