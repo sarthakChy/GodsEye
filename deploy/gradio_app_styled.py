@@ -779,6 +779,13 @@ def build_ui(device_note: str):
 
         for ctrl in [conf, top_k, score_thr, label_mode, manual_boxes, draw_mode]:
             ctrl.change(_dispatch, [still] + inputs_list, outputs_list)
+            
+        # -- GodsEye Temporal Dashboard Extension --
+        try:
+            from temporal.viz.dashboard_ui import build_godseye_ui
+            build_godseye_ui()
+        except ImportError as e:
+            print(f"[demo] GodsEye temporal UI failed to load: {e}")
 
     return demo
 

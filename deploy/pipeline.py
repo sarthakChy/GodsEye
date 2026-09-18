@@ -75,8 +75,7 @@ class PipelineConfig:
     default_classes: Optional[Sequence[str]] = None
     # relation head — these are the STATIC shapes; shrinking them is the
     # single biggest compute reduction available for a webcam scene.
-    ckpt: str = ("runs/train/sched_lr4e-4_ep8_r0_sig0.25_btd0.3_def4/"
-                 "checkpoint_best.pth")
+    ckpt: str = "maelic/relsgg-vits16"
     img_size: int = 448
     # MEASURED, and the old values were the single largest recall loss in the
     # product.
@@ -204,9 +203,16 @@ class ParallelScenePipeline:
             predicates = [str(q) for q in z["names"]]
             bank_E = z["W"]
         preds = list(predicates) if predicates else _default_predicates()
-        self.ra = RelateAnything.from_checkpoint(
-            cfg.ckpt, preds, device=str(self.device), weights="ema",
-            embeddings=bank_E)
+        
+        if "/" in cfg.ckpt and not os.path.exists(cfg.ckpt):
+            self.ra = RelateAnything.from_pretrained(
+                cfg.ckpt, preds, device=str(self.device), weights="ema",
+                embeddings=bank_E)
+        else:
+            self.ra = RelateAnything.from_checkpoint(
+                cfg.ckpt, preds, device=str(self.device), weights="ema",
+                embeddings=bank_E)
+                
         # Prefer an explicit config, then the checkpoint's own calibration.json,
         # then identity-with-a-warning. Same resolution order as the ONNX host.
         from relsgg.scoring import ScoreContract
