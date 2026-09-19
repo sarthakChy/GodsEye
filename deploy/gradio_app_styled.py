@@ -664,6 +664,109 @@ CANVAS_JS = r"""
 
 # ---------------------------------------------------------------- ui
 
+
+def run_video(video_path, conf_v, top_k_v, score_v, label_v, progress=gr.Progress()):
+    """Process an uploaded video frame-by-frame, return annotated MP4 + relations."""
+    if not video_path or PIPE is None:
+        msg = _error_panel("no video uploaded" if not video_path else "pipeline not ready")
+        return None, msg, msg, msg
+
+    import tempfile
+    import imageio
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        msg = _error_panel("could not open video")
+        return None, msg, msg, msg
+
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    n_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+    target_fps = 4.0
+    stride = max(1, int(round(src_fps / target_fps)))
+    max_frames = 120
+
+    PIPE.cfg.det_conf = float(conf_v)
+
+    tmp = tempfile.mkdtemp(prefix="godseye_vid_")
+    out_path = os.path.join(tmp, "annotated.mp4")
+    writer = imageio.get_writer(out_path, fps=target_fps, codec="libx264",
+                                 quality=7, macro_block_size=None)
+
+    all_rels = []
+    frame_records = []
+    processed = 0
+    idx = 0
+    t_start = 0.0
+    while processed < max_frames:
+        ret, frame_bgr = cap.read()
+        if not ret:
+            break
+        if idx % stride == 0:
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            ts = idx / float(src_fps) if src_fps > 0 else float(processed)
+            try:
+                res = PIPE(frame_rgb[:, :, ::-1].copy(),
+                           top_k=int(top_k_v), score_thr=float(score_v),
+                           decompose=True, spatial_drop_pair=False)
+                annotated = render(res, True, True, "both", label_v)
+                writer.append_data(annotated)
+                trip_list = [(int(s_), str(p_), int(o_), float(sc_))
+                             for s_, p_, o_, sc_ in res.triplets]
+                all_rels.extend(trip_list)
+                frame_records.append({
+                    "idx": idx,
+                    "ts": ts,
+                    "boxes": res.boxes_xyxy.tolist(),
+                    "labels": list(res.labels),
+                    "triplets": trip_list,
+                })
+            except Exception as e:
+                print(f"[video] frame {idx} failed: {e}")
+                writer.append_data(frame_rgb)
+            processed += 1
+        idx += 1
+
+    cap.release()
+    writer.close()
+
+    # --- save a GodsEye-format run so the temporal dashboard can load it ---
+    try:
+        from deploy.live_to_godseye import save_run
+        run_name = save_run(
+            video_path=video_path,
+            sample_fps=target_fps,
+            frames_records=frame_records,
+            score_threshold=float(score_v),
+        )
+        print(f"[video] GodsEye run saved as '{run_name}' — click Refresh List in the dashboard below")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[video] failed to save GodsEye run: {e}")
+
+    by_key = {}
+    for s_, p_, o_, sc_ in all_rels:
+        k = (s_, p_, o_)
+        if k not in by_key or sc_ > by_key[k][3]:
+            by_key[k] = (s_, p_, o_, sc_)
+    uniq = sorted(by_key.values(), key=lambda x: -x[3])[:int(top_k_v)]
+
+    spa = [t for t in uniq if _predicate_kind(t[1]) == "spatial"]
+    sem = [t for t in uniq if _predicate_kind(t[1]) == "semantic"]
+
+    class _Stub:
+        pass
+    stub = _Stub()
+    stub.labels = []
+
+    rel_all = _relations_panel([("all relations", uniq, "auto")], stub, label_v)
+    rel_spa = _relations_panel([("layout . spatial", spa, "spatial")], stub, label_v)
+    rel_sem = _relations_panel([("content . semantic", sem, "semantic")], stub, label_v)
+
+    print(f"[video] {processed} frames, {len(uniq)} unique relations -> {out_path}")
+    return out_path, rel_all, rel_spa, rel_sem
+
+
 def build_ui(device_note: str):
     with gr.Blocks(title="RelateAnything") as demo:
         with gr.Row(elem_id="workspace"):
@@ -675,7 +778,9 @@ def build_ui(device_note: str):
                             show_label=False, height=430, elem_id="source-image",
                         )
                     with gr.Tab("Video", id="video"):
-                        gr.Video(sources=["upload"], show_label=False, height=430)
+                        video_in = gr.Video(sources=["upload"], show_label=False, height=430)
+                        video_go = gr.Button("Process video (frame by frame)", variant="primary")
+                        video_out = gr.Video(label=None, show_label=False, height=430, interactive=False)
                     with gr.Tab("Webcam", id="webcam"):
                         cam = gr.Image(
                             sources=["webcam"], streaming=True, type="numpy",
@@ -780,6 +885,12 @@ def build_ui(device_note: str):
         for ctrl in [conf, top_k, score_thr, label_mode, manual_boxes, draw_mode]:
             ctrl.change(_dispatch, [still] + inputs_list, outputs_list)
             
+        video_go.click(
+            run_video,
+            [video_in, conf, top_k, score_thr, label_mode],
+            [video_out, rel_both, rel_spa, rel_sem],
+        )
+
         # -- GodsEye Temporal Dashboard Extension --
         try:
             from temporal.viz.dashboard_ui import build_godseye_ui

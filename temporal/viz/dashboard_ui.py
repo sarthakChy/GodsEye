@@ -23,10 +23,13 @@ STATE = DashboardState()
 
 
 def list_runs():
+    """Return run names, most recently processed first."""
     base = Path("outputs")
     if not base.exists():
         return []
-    return [d.name for d in base.iterdir() if d.is_dir() and (d / "manifest.json").exists()]
+    runs = [d for d in base.iterdir() if d.is_dir() and (d / "manifest.json").exists()]
+    runs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    return [d.name for d in runs]
 
 
 def load_run(run_name):
