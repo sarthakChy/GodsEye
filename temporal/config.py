@@ -12,8 +12,14 @@ class TrackingConfig:
     confidence_threshold: float = 0.3
     iou_threshold: float = 0.5
     track_buffer: int = 30          # render_video.py uses max_age=12
-    merge_window: int = 15          # Frames to check for re-ID
+    merge_window: int = 15          # (fallback) Frames to check for re-ID
     merge_iou_threshold: float = 0.4
+
+    # Static/dynamic re-ID (Embodied VideoAgent §C)
+    static_merge_window: int = 30       # Longer: static objects don't move
+    dynamic_merge_window: int = 5       # Shorter: dynamic objects move fast
+    static_motion_threshold: float = 3.0  # Avg px/frame; above -> dynamic
+    dynamic_match_radius: float = 60.0    # Px; center-distance fallback
 
 @dataclass
 class RelationConfig:
@@ -35,6 +41,14 @@ class TemporalConfig:
     kf_r: float = 1.0              # Measurement noise
     kf_p_max: float = 8.0          # Kill edge if unobserved too long
     min_duration_sec: float = 0.3
+
+    # Sliding-window state refinement (GraSP-VLA §III-B)
+    theta: int = 3                # Window size for state voting
+    theta_k: int = 2              # Consecutive frames needed to accept a transition
+    min_interval_sec: float = 0.2 # Discard intervals shorter than this
+
+    # Confidence accumulation (GraSP-VLA Eq. 5)
+    omega_sigma: float = 0.5      # Per-second confidence gain while active
 
 @dataclass
 class GodsEyeConfig:

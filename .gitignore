@@ -61,3 +61,20 @@ data/videos/
 
 # Local test videos
 test - videos/
+
+# Local artifacts
+footage/
+outputs/
+checkpoints/
+.venv/
+*.pth
+*.pt
+*.part
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.bak
+__pycache__/
+*.pyc
+.pytest_cache/

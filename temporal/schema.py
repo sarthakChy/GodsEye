@@ -22,6 +22,7 @@ class TemporalRelation:
     end_time: float
     mean_score: float
     frame_count: int
+    confidence: float = 0.0   # GraSP-VLA omega_r: accumulates while active
 
 @dataclass
 class Event:

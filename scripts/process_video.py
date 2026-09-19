@@ -27,8 +27,6 @@ def main():
     # Setup directories
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
-    frames_dir = out_dir / "frames"
-    frames_dir.mkdir(exist_ok=True)
     
     # Configuration
     config = GodsEyeConfig(

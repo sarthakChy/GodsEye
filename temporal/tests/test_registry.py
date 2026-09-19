@@ -12,7 +12,12 @@ class DummyTrack:
         
 def test_registry_reid():
     """Test that a track breaking for a few frames maps back to the same semantic ID."""
-    config = TrackingConfig(merge_window=5, merge_iou_threshold=0.5)
+    config = TrackingConfig(
+        merge_window=5,
+        merge_iou_threshold=0.5,
+        static_merge_window=5,
+        dynamic_merge_window=5,
+    )
     registry = Registry(config)
     
     # Frame 1: track 1 appears
@@ -49,7 +54,12 @@ def test_registry_reid():
     assert id_map[3] == "person_02"
     
 def test_registry_no_reid_different_class():
-    config = TrackingConfig(merge_window=5, merge_iou_threshold=0.5)
+    config = TrackingConfig(
+        merge_window=5,
+        merge_iou_threshold=0.5,
+        static_merge_window=5,
+        dynamic_merge_window=5,
+    )
     registry = Registry(config)
     
     t1 = DummyTrack(1, "person", np.array([0, 0, 10, 10]))
@@ -62,3 +72,30 @@ def test_registry_no_reid_different_class():
     id_map = registry.update(0.2, 2, [t2])
     
     assert id_map[2] == "car_01"
+
+
+def test_registry_static_vs_dynamic_windows():
+    config = TrackingConfig(
+        merge_window=5,
+        merge_iou_threshold=0.5,
+        static_merge_window=30,
+        dynamic_merge_window=2,
+        static_motion_threshold=3.0,
+        dynamic_match_radius=200.0,
+    )
+    registry = Registry(config)
+
+    for f, x in enumerate([0, 20, 40, 60]):
+        t = DummyTrack(1, "person", np.array([x, 0, x + 10, 10]))
+        registry.update(f * 0.1, f, [t])
+
+    registry.update(0.4, 4, [])
+
+    t2 = DummyTrack(2, "person", np.array([80, 0, 90, 10]))
+    id_map = registry.update(0.6, 6, [t2])
+    assert id_map[2] == "person_01"
+
+    registry.update(0.7, 7, [])
+    t3 = DummyTrack(3, "person", np.array([80, 0, 90, 10]))
+    id_map = registry.update(1.2, 12, [t3])
+    assert id_map[3] == "person_02"
