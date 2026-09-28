@@ -1,0 +1,7 @@
+{
+  "model_type": "relsgg",
+  "backbone_type": "dinov3",
+  "backbone_model": "facebook/dinov3-vits16plus-pretrain-lvd1689m",
+  "img_size": 448,
+  "text_dim": 512
+}

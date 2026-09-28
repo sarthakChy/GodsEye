@@ -8,8 +8,9 @@ tags:
 - scene-graph-generation
 - open-vocabulary
 - visual-relationship-detection
+- onnx
 model-index:
-- name: relsgg-vits16
+- name: relsgg-vits16plus
   results:
   - task:
       type: scene-graph-generation
@@ -18,11 +19,11 @@ model-index:
       type: vg150
     metrics:
     - type: F1@50
-      value: 0.3591
+      value: 0.3685
       name: F1@50 (vg150 test, graph-constrained)
 ---
 
-# relsgg-vits16
+# relsgg-vits16plus
 
 Open-vocabulary relation prediction from any boxes or masks. Give the model an
 image and regions from any source (a detector, a segmenter, ground truth); it
@@ -30,7 +31,7 @@ returns ranked relations over a predicate vocabulary supplied at inference,
 and optionally two graphs (spatial + semantic) from the same forward pass.
 Object class labels are never an input.
 
-Part of **RelateAnything** ([code](https://github.com/Maelic/RelateAnything) · [paper](https://arxiv.org/abs/2609.12552) · [project page](https://maelic.github.io/RelateAnythingProject)). Trained on
+Part of **RelateAnything** ([code](https://github.com/Maelic/RelateAnything) · [paper](https://arxiv.org/abs/2609.12552)). Trained on
 [RA-4M](https://huggingface.co/datasets/maelic/RA-4M); evaluated with
 [OV-SGG-Bench](https://github.com/Maelic/RelateAnything/blob/main/benchmark/SPEC.md).
 
@@ -38,7 +39,7 @@ Part of **RelateAnything** ([code](https://github.com/Maelic/RelateAnything) · 
 
 ```bash
 pip install git+https://github.com/Maelic/RelateAnything
-hf download maelic/relsgg-vits16          # optional; the API fetches on first use
+hf download maelic/relsgg-vits16plus          # optional; the API fetches on first use
 ```
 
 ```python
@@ -46,7 +47,7 @@ from relsgg import RelateAnything
 
 # Regions come from any detector, any segmenter, or your own annotation.
 # Object class labels are never an input.
-model = RelateAnything.from_pretrained("maelic/relsgg-vits16", device="cuda")
+model = RelateAnything.from_pretrained("maelic/relsgg-vits16plus", device="cuda")
 for t in model.predict(image, boxes_xyxy, topk=20):    # PIL/ndarray, boxes [N, 4] in pixels
     print(t)                                           # (person) --riding [0.67]--> (horse)
 
@@ -57,7 +58,7 @@ triplets = model.predict(image, boxes_xyxy, masks=masks, topk=20)
 model.set_vocabulary(["about to collide with", "reflected in"])
 
 # Or answer from the whole training vocabulary, 19,103 strings, read from the weights.
-model = RelateAnything.from_pretrained("maelic/relsgg-vits16", full_vocabulary=True, device="cuda")
+model = RelateAnything.from_pretrained("maelic/relsgg-vits16plus", full_vocabulary=True, device="cuda")
 
 # Two graphs from one forward pass.
 graphs = model.predict(image, boxes_xyxy, decompose=True)   # {"spatial": [...], "semantic": [...]}
@@ -71,7 +72,7 @@ encoding, which turns a minute and a half of CPU work into a download.
 no gated DINOv3 login.
 
 Files: `model.pth` (torch, EMA weights), `text_student.pt` + tokenizer,
-`predicate_embeddings.npz` (the training vocabulary, encoded), `predicate_bank.npz`, `thresholds.json`, `calibration.json`, `README.md`.
+`predicate_embeddings.npz` (the training vocabulary, encoded), `relateanything.onnx`, `predicate_bank.npz`, `thresholds.json`, `calibration.json`, `README.md`.
 
 **Every number below is generated from measured eval artifacts
 (`release/make_model_cards.py`); none is hand-typed.**
@@ -80,10 +81,10 @@ Files: `model.pth` (torch, EMA weights), `text_student.pt` + tokenizer,
 
 | source | R@50 | mR@50 | F1@50 |
 |---|---|---|---|
-| vg150 | 0.525 | 0.273 | 0.359 |
-| psg | 0.396 | 0.298 | 0.340 |
-| indoorvg | 0.519 | 0.276 | 0.360 |
-| hicodet | 0.453 | 0.305 | 0.365 |
+| vg150 | 0.533 | 0.282 | 0.369 |
+| psg | 0.401 | 0.306 | 0.347 |
+| indoorvg | 0.527 | 0.295 | 0.378 |
+| hicodet | 0.452 | 0.314 | 0.371 |
 
 ## Open-vocabulary, NO reparameterization (all 19,103 predicates deployed)
 
@@ -92,21 +93,21 @@ Synonym-matched at the calibrated tau (see provenance). This is the honest
 
 | source | SoftR@50 | SoftmR@50 | SoftF1@50 |
 |---|---|---|---|
-| vg150 | 0.551 | 0.333 | 0.415 |
-| psg | 0.303 | 0.268 | 0.284 |
-| indoorvg | 0.528 | 0.315 | 0.395 |
+| vg150 | 0.560 | 0.345 | 0.427 |
+| psg | 0.305 | 0.283 | 0.294 |
+| indoorvg | 0.533 | 0.346 | 0.419 |
 
 ## Spatial reasoning (SpatialSense, adversarial true/false; chance = 0.5)
 
-Macro AUC over predicates: **0.6757**
+Macro AUC over predicates: **0.6897**
 
 ## Two-graph decomposition (spatial / semantic, type-stratified protocol)
 
 | source | spatial R@50 / mR@50 | semantic R@50 / mR@50 |
 |---|---|---|
-| vg150 | 0.627 / 0.298 | 0.494 / 0.294 |
-| psg | 0.601 / 0.534 | 0.404 / 0.316 |
-| indoorvg | 0.606 / 0.335 | 0.406 / 0.276 |
+| vg150 | 0.632 / 0.308 | 0.497 / 0.309 |
+| psg | 0.608 / 0.543 | 0.408 / 0.330 |
+| indoorvg | 0.609 / 0.346 | 0.420 / 0.299 |
 
 ## Deployment thresholds (per-predicate best-F1, measured on THIS checkpoint)
 
@@ -117,31 +118,31 @@ val images. Top predicates by support:
 
 | predicate | threshold | best F1 | GT support |
 |---|---|---|---|
-| behind | 0.890 | 0.329 | 3599 |
-| in front of | 0.865 | 0.337 | 3576 |
-| wearing | 0.985 | 0.678 | 3417 |
-| to the right of | 0.860 | 0.377 | 3198 |
-| to the left of | 0.860 | 0.373 | 3098 |
-| resting on | 0.975 | 0.577 | 2164 |
-| on | 0.935 | 0.455 | 2042 |
-| holding | 0.975 | 0.457 | 1553 |
-| beside | 0.975 | 0.196 | 1404 |
-| next to | 0.945 | 0.240 | 1352 |
-| above | 0.895 | 0.333 | 1279 |
-| below | 0.890 | 0.321 | 1239 |
-| part of | 0.905 | 0.471 | 1134 |
-| supporting | 0.985 | 0.191 | 947 |
-| looking at | 0.965 | 0.254 | 872 |
+| behind | 0.900 | 0.330 | 3599 |
+| in front of | 0.870 | 0.347 | 3575 |
+| wearing | 0.980 | 0.690 | 3417 |
+| to the right of | 0.855 | 0.385 | 3198 |
+| to the left of | 0.860 | 0.372 | 3097 |
+| resting on | 0.975 | 0.579 | 2166 |
+| on | 0.935 | 0.457 | 2043 |
+| holding | 0.975 | 0.456 | 1552 |
+| beside | 0.980 | 0.196 | 1406 |
+| next to | 0.940 | 0.235 | 1352 |
+| above | 0.880 | 0.321 | 1280 |
+| below | 0.895 | 0.317 | 1240 |
+| part of | 0.905 | 0.484 | 1134 |
+| supporting | 0.985 | 0.194 | 947 |
+| looking at | 0.955 | 0.256 | 872 |
 
 ## Provenance
 
 | | |
 |---|---|
-| run | `relsgg-vits16` |
+| run | `relsgg-vits16plus` |
 | git | `e9ea42aed60f766f12ad19d51709129c50110a3b` |
-| backbone | facebook/dinov3-vits16-pretrain-lvd1689m |
+| backbone | facebook/dinov3-vits16plus-pretrain-lvd1689m |
 | text student | `runs/packed/text_student_v2_512/student.pt` sha256 `e0317830b68ea51e...` |
-| ONNX opset / parity | 17 / max|Δ| 1.36e-05 |
+| ONNX opset / parity | 17 / max|Δ| 6.87e-05 |
 | torch / transformers | 2.13.0+cu130 / 5.14.1 |
 | training mixture | megasg_clean + vg_raw + hicodet, per-image 0.727/0.063/0.210; source-aware negatives: ['hicodet'] |
 

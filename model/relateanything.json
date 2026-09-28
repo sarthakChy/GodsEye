@@ -51,15 +51,15 @@
  "output_kind": "logits",
  "score_contract": "sigmoid(a * (pred_logit + w * pair_logit) + b)",
  "calibration": {
-  "a": 0.5377,
-  "b": -1.9694
+  "a": 0.5651,
+  "b": -1.9623
  },
  "calibrated": true,
- "source_checkpoint": "runs/train/relsgg-vits16/checkpoint_last.pth",
- "run_name": "relsgg-vits16",
+ "source_checkpoint": "runs/train/relsgg-vits16plus/checkpoint_last.pth",
+ "run_name": "relsgg-vits16plus",
  "git_sha": "e9ea42aed60f766f12ad19d51709129c50110a3b",
  "backbone_type": "dinov3",
- "backbone_model": "facebook/dinov3-vits16-pretrain-lvd1689m",
+ "backbone_model": "facebook/dinov3-vits16plus-pretrain-lvd1689m",
  "text_student": "runs/packed/text_student_v2_512/student.pt",
  "text_student_sha256": "e0317830b68ea51e6711fc90d4a35954d0528e5bd78a8d5afd966601ce4ed119",
  "pred_embeds": "runs/packed/datamix_v22/text_space/pred_embeds_studentv2_512_photo.npz",
@@ -68,6 +68,6 @@
  "transformers": "5.14.1",
  "opset": 17,
  "exported": "2026-08-27",
- "check_max_abs_delta": 1.3589859008789062e-05,
- "backbone_model_local": "checkpoints/hf/vits16_lvd1689m"
+ "check_max_abs_delta": 6.866455078125e-05,
+ "backbone_model_local": "checkpoints/hf/vits16plus_lvd1689m"
 }
