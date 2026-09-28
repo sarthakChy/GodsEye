@@ -14,7 +14,7 @@ from typing import Any
 import networkx as nx
 
 
-def _group_intervals(observations, gap_sec=1.0, min_frames=2, min_duration=0.5):
+def _group_intervals(observations, gap_sec=1.5, min_frames=1, min_duration=0.0):
     """observations: list of (ts, score). Returns list of (start, end, mean, n)."""
     if len(observations) < min_frames:
         return []
@@ -87,13 +87,17 @@ def save_run(
     # ---- aggregate temporal relations (class-level) ----
     history: dict[tuple[str, str, str], list[tuple[float, float]]] = defaultdict(list)
     for rec in frames_records:
+        # Prefer the per-detection IDs the frame recorder attached. Older
+        # runs (or manual callers) fall back to "label_index".
+        det2sem = rec.get("det2semantic") or {
+            i: f"{lab}_{i}" for i, lab in enumerate(rec["labels"])}
         for s, p, o, sc in rec["triplets"]:
             if float(sc) < score_threshold:
                 continue
             if s >= len(rec["labels"]) or o >= len(rec["labels"]):
                 continue
-            subj = rec["labels"][s]
-            obj = rec["labels"][o]
+            subj = det2sem.get(s, rec["labels"][s])
+            obj = det2sem.get(o, rec["labels"][o])
             if subj == obj:                # drop self-loops
                 continue
             if s == o:                     # drop same-detection edges
@@ -119,17 +123,24 @@ def save_run(
     # ---- scene graph ----
     G = nx.MultiDiGraph()
     for ev in events:
-        for nid, cls in (
-            (ev["subject_id"], ev["subject_id"]),
-            (ev["object_id"], ev["object_id"]),
-        ):
+        for nid in (ev["subject_id"], ev["object_id"]):
             if nid not in G:
                 G.add_node(
                     nid,
-                    class_name=cls,
+                    class_name=nid,
                     first_seen=ev["start_time"],
                     last_seen=ev["end_time"],
                 )
+            else:
+                # Extend the node's lifetime on EVERY event it takes part in.
+                # Previously last_seen was frozen at the first event, so
+                # TemporalSceneGraph.query_time() dropped the node after ~1s
+                # and every edge touching it disappeared.
+                node = G.nodes[nid]
+                node["first_seen"] = min(
+                    node.get("first_seen", ev["start_time"]), ev["start_time"])
+                node["last_seen"] = max(
+                    node.get("last_seen", ev["end_time"]), ev["end_time"])
         G.add_edge(
             ev["subject_id"],
             ev["object_id"],

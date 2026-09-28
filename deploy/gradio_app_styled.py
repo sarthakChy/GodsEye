@@ -665,6 +665,19 @@ CANVAS_JS = r"""
 # ---------------------------------------------------------------- ui
 
 
+
+def _iou_xyxy(a, b) -> float:
+    """IoU of two xyxy boxes (numpy or list). Used by run_video's tracker."""
+    x1 = max(float(a[0]), float(b[0])); y1 = max(float(a[1]), float(b[1]))
+    x2 = min(float(a[2]), float(b[2])); y2 = min(float(a[3]), float(b[3]))
+    iw = max(0.0, x2 - x1); ih = max(0.0, y2 - y1)
+    inter = iw * ih
+    ua = ((float(a[2]) - float(a[0])) * (float(a[3]) - float(a[1]))
+          + (float(b[2]) - float(b[0])) * (float(b[3]) - float(b[1]))
+          - inter)
+    return inter / ua if ua > 0 else 0.0
+
+
 def run_video(video_path, conf_v, top_k_v, score_v, label_v, progress=gr.Progress()):
     """Process an uploaded video frame-by-frame, return annotated MP4 + relations."""
     if not video_path or PIPE is None:
@@ -686,6 +699,42 @@ def run_video(video_path, conf_v, top_k_v, score_v, label_v, progress=gr.Progres
     max_frames = 120
 
     PIPE.cfg.det_conf = float(conf_v)
+
+    # ---- stable per-track IDs (IoU re-ID) -------------------------------
+    # Detection indices shuffle frame-to-frame, so keying on them makes
+    # every relation a 1-frame blip. This keeps IDs stable across frames
+    # by matching detections to recently seen tracks (same label, IoU >=
+    # iou_thr). Tracks unseen for > max_age frames are dropped.
+    _tracks: list = []      # {"id", "label", "box" (np.ndarray), "last_frame"}
+    _counts: dict = {}      # label -> how many instances so far, per video
+
+    def assign_ids(labels, boxes, frame_idx, iou_thr: float = 0.3,
+                   max_age: int = 15) -> dict:
+        nonlocal _tracks
+        _tracks = [t for t in _tracks
+                   if frame_idx - t["last_frame"] <= max_age]
+        used, out = set(), {}
+        for i, (lab, box) in enumerate(zip(labels, boxes)):
+            best_j, best_v = -1, iou_thr
+            for j, t in enumerate(_tracks):
+                if j in used or t["label"] != lab:
+                    continue
+                v = _iou_xyxy(box, t["box"])
+                if v > best_v:
+                    best_v, best_j = v, j
+            if best_j >= 0:
+                out[i] = _tracks[best_j]["id"]
+                used.add(best_j)
+                _tracks[best_j]["box"] = box
+                _tracks[best_j]["last_frame"] = frame_idx
+            else:
+                n = _counts.get(lab, 0) + 1
+                _counts[lab] = n
+                new_id = f"{lab}_{n:02d}"
+                _tracks.append({"id": new_id, "label": lab, "box": box,
+                                "last_frame": frame_idx})
+                out[i] = new_id
+        return out
 
     tmp = tempfile.mkdtemp(prefix="godseye_vid_")
     out_path = os.path.join(tmp, "annotated.mp4")
@@ -713,11 +762,17 @@ def run_video(video_path, conf_v, top_k_v, score_v, label_v, progress=gr.Progres
                 trip_list = [(int(s_), str(p_), int(o_), float(sc_))
                              for s_, p_, o_, sc_ in res.triplets]
                 all_rels.extend(trip_list)
+                # Same key the manifest publishes, so the dashboard overlay
+                # looks up graph nodes and detected boxes in ONE id space.
+                # Without this "person_0" (manifest) and "person" (graph)
+                # never matched and no arrow ever drew.
+                det2sem = assign_ids(res.labels, res.boxes_xyxy, idx)
                 frame_records.append({
                     "idx": idx,
                     "ts": ts,
                     "boxes": res.boxes_xyxy.tolist(),
                     "labels": list(res.labels),
+                    "det2semantic": det2sem,
                     "triplets": trip_list,
                 })
             except Exception as e:
