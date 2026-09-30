@@ -51,7 +51,7 @@ class VideoTracker:
         self.tracker.step(frame_width, frame_height, fade=1.0)
         
         # Get active tracks and run through registry for Re-ID and semantic ID assignment
-        active_tracks = [t for t in self.tracker.tracks if t.hits >= 2 and t.misses == 0]
+        active_tracks = [t for t in self.tracker.tracks if t.hits >= 2]
         track2semantic = self.registry.update(timestamp, frame_idx, active_tracks)
         
         # Create det2semantic mapping (detection index -> semantic ID)

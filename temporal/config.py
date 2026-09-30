@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 @dataclass
 class VideoConfig:
     sample_fps: float = 2.0         # Extract 2 frames/sec
-    max_frames: int = 600           # Cap for long videos
+    max_frames: int | None = None   # Cap for long videos (None = no cap)
     resize_max_dim: int = 1280      # Resize large frames
 
 @dataclass

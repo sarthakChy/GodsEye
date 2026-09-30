@@ -1,5 +1,6 @@
 from typing import List, Dict, Tuple, Any, Optional
 from collections import deque
+import math
 import numpy as np
 
 from deploy.render_video import EdgeBook, Edge
@@ -169,9 +170,13 @@ class TemporalAggregator:
                         n = rel.frame_count
                         rel.mean_score = (rel.mean_score * n + raw_score) / (n + 1)
                         rel.frame_count = n + 1
-                    # GraSP-VLA Eq. 5: omega_r += sigma * (tau_c - tau_r)
+                    # Bounded EMA: confidence stays in [0, 1] and does not
+                    # accumulate with duration. omega_sigma is the same time
+                    # constant as before, but alpha saturates at 1.
                     dt = timestamp - self._last_ts.get(key, timestamp)
-                    rel.confidence += self.omega_sigma * max(0.0, dt)
+                    alpha = 1.0 - math.exp(-self.omega_sigma * max(0.0, dt))
+                    rel.confidence = (rel.confidence * (1.0 - alpha)
+                                      + float(raw_score) * alpha)
                     self._last_ts[key] = timestamp
 
             # --- ON -> OFF: close the interval ---

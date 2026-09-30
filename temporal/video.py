@@ -16,7 +16,7 @@ class VideoLoader:
     
     Frames are yielded one at a time to keep memory bounded.
     """
-    def __init__(self, path: str, sample_fps: float = 2.0, max_frames: int = 600, resize_max_dim: int = 1280):
+    def __init__(self, path: str, sample_fps: float = 2.0, max_frames: int | None = None, resize_max_dim: int = 1280):
         self.path = path
         self.sample_fps = sample_fps
         self.max_frames = max_frames
@@ -70,7 +70,7 @@ class VideoLoader:
         actual_fps = self.sample_fps if self.sample_fps > 0 else self.metadata["fps"]
         
         for buf in gen:
-            if frame_idx >= self.max_frames:
+            if self.max_frames is not None and frame_idx >= self.max_frames:
                 break
             
             frame_array = np.frombuffer(buf, np.uint8).reshape(H, W, 3)
