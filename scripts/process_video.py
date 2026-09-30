@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--output", type=str, required=True, help="Output directory")
     parser.add_argument("--device", type=str, default="cpu", help="Device to run on")
     parser.add_argument("--detector", type=str, default="checkpoints/detectors/yoloe-11m-seg-pf.pt", help="Path to YOLO weights")
+    parser.add_argument("--remind-jsonl", type=str, default=None, help="Path to REMIND detections.jsonl. If set, skip detector + tracker and read detections from this file. The persistent object_id becomes the semantic ID suffix.")
     args = parser.parse_args()
 
     # Setup directories
@@ -37,21 +38,28 @@ def main():
     )
 
     print("Initializing pipeline components...")
-    # Match deploy/pipeline.py's loader dispatch: YOLOE class for yoloe
-    # checkpoints (handles prompt-free mode), YOLO for everything else.
-    # Using a plain YOLO on a yoloe-*-pf checkpoint loses prompt-free
-    # behaviour and can silently produce different class names.
-    det_path = config.tracking.detector_model
-    if "yoloe" in os.path.basename(det_path).lower():
-        from ultralytics import YOLOE as _Det
+    # Detector + tracker are loaded only when REMIND is not supplying them.
+    remind_cache = None
+    detector = None
+    if args.remind_jsonl:
+        from temporal.remind_adapter import RemindCache
+        remind_cache = RemindCache(args.remind_jsonl)
+        print(f"  REMIND cache: {args.remind_jsonl} "
+              f"({len(remind_cache)} frames)  [detector + tracker skipped]")
     else:
-        from ultralytics import YOLO as _Det
-    detector = _Det(det_path)
-    prompt_free = "-pf" in os.path.basename(det_path)
-    print(f"  detector: {det_path}  (prompt_free={prompt_free})")
+        # Match deploy/pipeline.py's loader dispatch: YOLOE class for yoloe
+        # checkpoints (handles prompt-free mode), YOLO for everything else.
+        det_path = config.tracking.detector_model
+        if "yoloe" in os.path.basename(det_path).lower():
+            from ultralytics import YOLOE as _Det
+        else:
+            from ultralytics import YOLO as _Det
+        detector = _Det(det_path)
+        prompt_free = "-pf" in os.path.basename(det_path)
+        print(f"  detector: {det_path}  (prompt_free={prompt_free})")
     
     loader = VideoLoader(args.video, sample_fps=config.video.sample_fps)
-    tracker = VideoTracker(config.tracking)
+    tracker = None if remind_cache is not None else VideoTracker(config.tracking)
     extractor = RelationExtractor(config.relation)
     aggregator = TemporalAggregator(config.temporal)
     
@@ -65,22 +73,43 @@ def main():
         "frames": []
     }
     
+    # Track first_seen/last_seen per semantic ID for the scene graph.
+    # In REMIND mode there is no registry to ask, so we build this here.
+    seen_objects: dict[str, dict] = {}
+
     for frame_idx, timestamp, frame in tqdm(loader.stream_frames()):
         
-        # 1. Detect
+        # 1. Detect + 2. Track & Re-ID
         H, W = frame.shape[:2]
-        res = detector(frame, verbose=False, device=config.relation.device)[0]
-        
-        boxes = res.boxes.xyxy.cpu().numpy()
-        confs = res.boxes.conf.cpu().numpy()
-        cls_ids = res.boxes.cls.cpu().numpy().astype(int)
-        names = detector.names
-        labels = [names[cls_id] for cls_id in cls_ids]
-        
-        # 2. Track & Re-ID
-        det2semantic, active_tracks = tracker.process_frame(
-            frame_idx, timestamp, boxes, labels, confs, W, H
-        )
+        if remind_cache is not None:
+            hit = remind_cache.det2semantic_for(timestamp)
+            if hit is None:
+                continue
+            det2semantic, boxes, labels, confs = hit
+            active_tracks = []
+        else:
+            res = detector(frame, verbose=False, device=config.relation.device)[0]
+            boxes = res.boxes.xyxy.cpu().numpy()
+            confs = res.boxes.conf.cpu().numpy()
+            cls_ids = res.boxes.cls.cpu().numpy().astype(int)
+            names = detector.names
+            labels = [names[cls_id] for cls_id in cls_ids]
+            det2semantic, active_tracks = tracker.process_frame(
+                frame_idx, timestamp, boxes, labels, confs, W, H
+            )
+
+        # Record per-object first/last seen for the scene graph.
+        for sem_id in det2semantic.values():
+            cls = sem_id.rsplit("_", 1)[0]
+            rec = seen_objects.get(sem_id)
+            if rec is None:
+                seen_objects[sem_id] = {
+                    "class_name": cls,
+                    "first_seen": timestamp,
+                    "last_seen": timestamp,
+                }
+            else:
+                rec["last_seen"] = timestamp
         active_semantic_ids = set(t.label for t in active_tracks) # Wait, tracker's label is original class.
         # We need semantic_ids for active tracks
         active_semantic_ids = set(det2semantic.values())
@@ -134,8 +163,16 @@ def main():
     
     tsg = TemporalSceneGraph()
     # Add objects
-    for obj_id, obj_data in tracker.get_active_objects().items():
-        tsg.add_object(obj_id, obj_data.class_name, obj_data.first_seen, obj_data.last_seen)
+    if remind_cache is not None:
+        # REMIND path: objects are whatever appeared in det2semantic.
+        for obj_id, rec in seen_objects.items():
+            tsg.add_object(obj_id, rec["class_name"],
+                           rec["first_seen"], rec["last_seen"])
+    else:
+        # Built-in tracker path: pull full metadata from the registry.
+        for obj_id, obj_data in tracker.get_active_objects().items():
+            tsg.add_object(obj_id, obj_data.class_name,
+                           obj_data.first_seen, obj_data.last_seen)
         
     # Add relations
     for rel in temporal_rels:
