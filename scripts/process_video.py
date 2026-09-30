@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--video", type=str, required=True, help="Path to input video")
     parser.add_argument("--output", type=str, required=True, help="Output directory")
     parser.add_argument("--device", type=str, default="cpu", help="Device to run on")
-    parser.add_argument("--detector", type=str, default="yolov8m.pt", help="Path to YOLO weights")
+    parser.add_argument("--detector", type=str, default="checkpoints/detectors/yoloe-11m-seg-pf.pt", help="Path to YOLO weights")
     args = parser.parse_args()
 
     # Setup directories
@@ -37,9 +37,18 @@ def main():
     )
 
     print("Initializing pipeline components...")
-    # Using Ultralytics YOLO directly for detection since Tracker just needs (boxes, labels, confs)
-    from ultralytics import YOLO
-    detector = YOLO(config.tracking.detector_model)
+    # Match deploy/pipeline.py's loader dispatch: YOLOE class for yoloe
+    # checkpoints (handles prompt-free mode), YOLO for everything else.
+    # Using a plain YOLO on a yoloe-*-pf checkpoint loses prompt-free
+    # behaviour and can silently produce different class names.
+    det_path = config.tracking.detector_model
+    if "yoloe" in os.path.basename(det_path).lower():
+        from ultralytics import YOLOE as _Det
+    else:
+        from ultralytics import YOLO as _Det
+    detector = _Det(det_path)
+    prompt_free = "-pf" in os.path.basename(det_path)
+    print(f"  detector: {det_path}  (prompt_free={prompt_free})")
     
     loader = VideoLoader(args.video, sample_fps=config.video.sample_fps)
     tracker = VideoTracker(config.tracking)

@@ -8,7 +8,7 @@ class VideoConfig:
 
 @dataclass
 class TrackingConfig:
-    detector_model: str = "yolov8m.pt"
+    detector_model: str = "checkpoints/detectors/yoloe-11m-seg-pf.pt"
     confidence_threshold: float = 0.3
     iou_threshold: float = 0.5
     track_buffer: int = 30          # render_video.py uses max_age=12
