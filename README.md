@@ -60,6 +60,38 @@ Three properties make that work, and they are the point of the project:
 The model runs at 20 ms per frame end to end on an A40 and as one ONNX graph on a
 laptop CPU or [in the browser](https://maelic.github.io/RelateAnythingProject/demo/).
 
+## 🚀 Quick Setup & Run (Works on ANY Device with Auto-GPU Detection)
+
+Clone and set up in one step on any Windows, Linux, or macOS machine:
+
+### On Windows:
+Double-click `setup.bat` (or run in PowerShell/CMD):
+```powershell
+setup.bat
+run_dashboard.bat
+```
+
+### On Linux / macOS:
+```bash
+chmod +x setup.sh run_dashboard.sh
+./setup.sh
+./run_dashboard.sh
+```
+
+### Or using Python directly:
+```bash
+python setup_env.py
+python run_dashboard_v2.py
+```
+
+**What the setup automatically handles:**
+- 🔍 **Auto Hardware Detection**: Detects NVIDIA GPUs, Apple Silicon (Metal MPS), or CPU.
+- ⚡ **Auto-Installs CUDA PyTorch**: Automatically configures the matching CUDA-accelerated PyTorch build (CUDA 12.4/11.8) if an NVIDIA GPU is present.
+- 📦 **Downloads Model Weights**: Automatically fetches `relsgg-vits16plus` (~250 MB) from Hugging Face Hub and YOLOE detectors (`yoloe-11m-seg-pf.pt` and `yoloe-11s-seg-pf.pt`) from GitHub releases.
+- 🛡️ **Self-Healing**: If any weights are missing when you launch `python run_dashboard_v2.py`, it automatically downloads them on first run.
+
+---
+
 ## Install
 
 ```bash

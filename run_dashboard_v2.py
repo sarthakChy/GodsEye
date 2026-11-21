@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 """One-shot launcher for GodsEye Dashboard v2.
 
-    python run_dashboard_v2.py                 # CPU, auto-detects weights
-    python run_dashboard_v2.py --device cuda   # GPU
+    python run_dashboard_v2.py                 # auto GPU (falls back to CPU if CUDA unavailable)
+    python run_dashboard_v2.py --device cuda   # force GPU
+    python run_dashboard_v2.py --device cpu    # force CPU
     python run_dashboard_v2.py --port 7862     # custom port
     python run_dashboard_v2.py --no-pipeline   # Instant launch without model (temporal tabs only)
 """
@@ -20,8 +21,8 @@ def main():
         sys.path.insert(0, str(REPO))
     os.chdir(REPO)
 
-    if "--device" not in sys.argv:
-        os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+    # Remove CUDA masking so the GPU is accessible by default
+    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
 
     APP = REPO / "temporal" / "viz" / "dashboard_v2.py"
     if not APP.exists():
@@ -30,15 +31,25 @@ def main():
     CKPT = REPO / "model" / "model.pth"
     DET_M = REPO / "checkpoints" / "detectors" / "yoloe-11m-seg-pf.pt"
     DET_S = REPO / "checkpoints" / "detectors" / "yoloe-11s-seg-pf.pt"
-    DET = DET_M if DET_M.exists() else DET_S
 
     if "--no-pipeline" not in sys.argv:
+        # Auto-download missing model weights or detectors if not present
+        if not CKPT.exists() or (not DET_M.exists() and not DET_S.exists()):
+            print("[run_dashboard_v2] Model weights or detectors not found. Running auto-download...")
+            try:
+                from setup_env import ensure_model_weights
+                ensure_model_weights()
+            except Exception as e:
+                print(f"[run_dashboard_v2] Auto-download failed: {e}. Run 'python setup_env.py' to configure.")
+
+        DET = DET_M if DET_M.exists() else DET_S
         if "--ckpt" not in sys.argv and CKPT.exists():
             sys.argv += ["--ckpt", str(CKPT)]
         if "--det" not in sys.argv and DET.exists():
             sys.argv += ["--det", str(DET)]
+        # Default to CUDA; dashboard_v2.py auto-falls back to CPU if CUDA is unavailable
         if "--device" not in sys.argv:
-            sys.argv += ["--device", "cpu"]
+            sys.argv += ["--device", "cuda"]
 
     if "--port" not in sys.argv:
         sys.argv += ["--port", "7861"]

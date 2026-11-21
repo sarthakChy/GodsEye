@@ -81,6 +81,7 @@ __pycache__/
 
 # Local artifacts
 footage.zip
+*.zip
 outputs/
 footage/
 godseye_demo.mp4

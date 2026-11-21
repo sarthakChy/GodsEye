@@ -48,10 +48,29 @@ def _load_pipe(ckpt: str, det: str, device: str):
     global PIPE
     if PIPE is not None:
         return
+    import torch
+    # Auto-fallback: if cuda requested but unavailable, drop to CPU
+    if device == "cuda" and not torch.cuda.is_available():
+        print("[GodsEye v2] ⚠ CUDA not available — falling back to CPU")
+        device = "cpu"
+    if device == "cuda":
+        gpu_name = torch.cuda.get_device_name(0)
+        vram_gb  = torch.cuda.get_device_properties(0).total_memory / 1e9
+        print(f"[GodsEye v2] 🚀 GPU detected: {gpu_name} ({vram_gb:.1f} GB VRAM)")
+        # Enable TF32 for matmul/conv — free speedup on Ampere/Ada GPUs
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32       = True
+        torch.backends.cudnn.benchmark        = True  # auto-tune kernels
     from deploy.pipeline import ParallelScenePipeline, PipelineConfig
-    cfg = PipelineConfig(ckpt=ckpt, det_weights=det, device=device)
+    cfg = PipelineConfig(
+        ckpt=ckpt,
+        det_weights=det,
+        device=device,
+        amp=(device == "cuda"),          # AMP: bfloat16 on GPU → ~2× faster
+        overlap=(device == "cuda"),      # backbone‖detector overlap on GPU only
+    )
     PIPE = ParallelScenePipeline(cfg)
-    print(f"[GodsEye v2] pipeline ready on {device}")
+    print(f"[GodsEye v2] ✅ Pipeline ready on {device.upper()}")
 
 
 # ── temporal / exam imports ──────────────────────────────────────────────────
@@ -68,14 +87,13 @@ from temporal.exam_rules import run_exam_rules, violations_at_time, MalpracticeE
 # ═══════════════════════════════════════════════════════════════════════════
 
 DEFAULT_CLASSES = [
-    "person", "face", "hand", "laptop", "keyboard", "mouse", "monitor",
-    "cup", "bottle", "phone", "book", "chair", "desk", "backpack", "hat",
-    "glasses", "plant", "door", "window", "picture", "lamp", "bag",
+    "person", "hand", "laptop", "phone", "book", "chair", "desk",
+    "backpack", "bag", "pen", "pencil", "paper", "notebook",
 ]
 
 EXAM_CLASSES = [
-    "person", "book", "notebook", "paper", "phone", "cell_phone",
-    "desk", "table", "pen", "pencil", "bag", "backpack", "laptop",
+    "person", "hand", "laptop", "phone", "book", "paper",
+    "notebook", "desk", "pen", "pencil", "bag", "backpack",
 ]
 
 PREDICATE_PRESETS = {
@@ -375,6 +393,77 @@ CSS = r"""
   font-family: var(--font); font-size: 12px; color: var(--text1);
 }
 .hud-pill strong { color: var(--accent2); font-size: 13px; }
+
+/* ──────────── Professional UI overrides ──────────── */
+
+/* Full-page dark bg */
+body, html { background: #060810 !important; }
+
+/* Sticky header */
+#gd-header {
+  background: linear-gradient(135deg, #060f28 0%, #0d1f4a 60%, #0e1f3f 100%) !important;
+  padding: 0 28px !important;
+  height: 64px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 200;
+  border-bottom: 1px solid #1e3560 !important;
+  backdrop-filter: blur(10px);
+}
+#gd-header .title { font-size: 21px !important; letter-spacing: -.03em !important; }
+#gd-header .subtitle { font-size: 11px !important; color: #7dd3fc !important; }
+#gd-header .badge {
+  background: linear-gradient(135deg, #1d4ed8, #0891b2) !important;
+  box-shadow: 0 0 18px rgba(29,78,216,0.45) !important;
+  border: 1px solid rgba(96,165,250,0.25) !important;
+  letter-spacing: .07em !important;
+}
+
+/* Stats bar accent numbers */
+.stats-bar strong { color: #22d3ee !important; }
+
+/* Side panel */
+#side-panel-v2 {
+  background: #0a0f1a !important;
+  border: 1px solid #1e2d3f !important;
+  border-radius: 12px !important;
+}
+
+/* Webcam stop button */
+.btn-danger {
+  background: rgba(127,29,29,0.7) !important;
+  color: #fca5a5 !important;
+  border: 1px solid #7f1d1d !important;
+  border-radius: 8px !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  letter-spacing: .01em;
+  transition: background .15s, border-color .15s;
+}
+.btn-danger:hover {
+  background: #991b1b !important;
+  color: #fff !important;
+  border-color: #ef4444 !important;
+}
+
+/* Pulsing live dot for webcam */
+@keyframes live-blink {
+  0%, 100% { opacity:1; box-shadow: 0 0 7px #f87171; }
+  50%       { opacity:.35; box-shadow: none; }
+}
+.cam-live-dot {
+  display: inline-block; width: 7px; height: 7px;
+  border-radius: 50%; background: #f87171; margin-right: 5px;
+  animation: live-blink 1.3s infinite ease-in-out;
+  vertical-align: middle;
+}
+
+/* Webcam controls bar */
+#webcam-controls {
+  display: flex; align-items: center; gap: 10px;
+  background: #0b1329; border-radius: 8px;
+  padding: 8px 12px; margin-top: 8px;
+  border: 1px solid #1e3560;
+}
 """
 
 
@@ -969,9 +1058,13 @@ def run_video_proc(video_path, conf_v, top_k_v, score_v, label_v, progress=gr.Pr
 
     src_fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
     n_total    = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-    target_fps = 4.0
+    # On GPU: 4 FPS sampling, 90 frames max → ~22 s of video at full quality
+    # On CPU: auto-halved inside the loop via stride
+    import torch as _torch
+    _on_gpu = PIPE is not None and _torch.cuda.is_available()
+    target_fps = 4.0 if _on_gpu else 2.0
+    max_frames = 90  if _on_gpu else 50
     stride     = max(1, int(round(src_fps / target_fps)))
-    max_frames = 120
     n_to_proc  = min(max_frames, max(1, n_total // stride))
     PIPE.cfg.det_conf = float(conf_v)
 
@@ -1228,12 +1321,19 @@ def build_ui():
         gr.HTML("""
         <div id="gd-header">
           <div class="title-area">
+            <div style="width:38px;height:38px;border-radius:10px;
+                        background:linear-gradient(135deg,#1d4ed8,#0891b2);
+                        display:flex;align-items:center;justify-content:center;
+                        font-size:20px;box-shadow:0 0 20px rgba(29,78,216,0.5);flex-shrink:0">👁</div>
             <div>
-              <div class="title">👁 GodsEye v2</div>
-              <div class="subtitle">Neuro-Symbolic Temporal Event Graphs & Exam Integrity Auditor</div>
+              <div class="title">GodsEye <span style="color:#22d3ee;font-weight:900">v2</span></div>
+              <div class="subtitle">Neuro-Symbolic Temporal Event Graphs &amp; Exam Integrity Auditor</div>
             </div>
           </div>
-          <span class="badge">ExamGuard-Causal Active</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:7px;height:7px;border-radius:50%;background:#4ade80;box-shadow:0 0 8px #4ade80"></div>
+            <span class="badge">ExamGuard Active</span>
+          </div>
         </div>
         """)
 
@@ -1279,9 +1379,30 @@ def build_ui():
                                                    elem_classes="gd-media")
 
                             with gr.Tab("📷  Webcam"):
+                                gr.HTML(
+                                    '<div id="webcam-controls">'
+                                    '<span style="font-size:12px;color:#94a3b8;font-family:Inter,sans-serif">'
+                                    '<span class="cam-live-dot"></span> Live stream · results appear below</span>'
+                                    '</div>'
+                                )
                                 cam = gr.Image(
                                     sources=["webcam"], streaming=True, type="numpy",
-                                    show_label=False, height=380, elem_classes="gd-media",
+                                    show_label=False, height=320, elem_classes="gd-media",
+                                )
+                                with gr.Row():
+                                    cam_stop_btn = gr.Button(
+                                        "⏹ Stop Webcam",
+                                        elem_classes="btn-danger",
+                                        size="sm",
+                                    )
+                                    gr.HTML(
+                                        '<span style="font-size:11px;color:#64748b;'
+                                        'font-family:Inter,sans-serif;line-height:32px;padding-left:6px">'
+                                        'Click to freeze the feed</span>'
+                                    )
+                                cam_out = gr.Image(
+                                    label=None, height=320, show_label=False,
+                                    interactive=False, elem_classes="gd-media",
                                 )
 
                         stats_html = gr.HTML()
@@ -1296,16 +1417,16 @@ def build_ui():
 
                     # Side Controls
                     with gr.Column(scale=3, elem_id="side-panel-v2"):
-                        gr.HTML('<div class="gd-panel-title">① LABELS</div>')
-                        label_mode = gr.Radio(["names", "colours"], value="colours",
+                        gr.HTML('<div class="gd-panel-title">① LABEL MODE</div>')
+                        label_mode = gr.Radio(["names", "colours"], value="names",
                                               label="Label objects by")
 
-                        gr.HTML('<div class="gd-panel-title" style="margin-top:14px">② BOXES (OPTIONAL MANUAL)</div>')
-                        draw_mode = gr.Checkbox(False, label="Draw on image",
-                                                info="Drag rectangles on image. Double-click to clear.",
+                        gr.HTML('<div class="gd-panel-title" style="margin-top:14px">② MANUAL BOXES (OPTIONAL)</div>')
+                        draw_mode = gr.Checkbox(False, label="Draw boxes on image",
+                                                info="Drag on image to draw. Dbl-click to clear.",
                                                 elem_id="v2-draw-mode")
                         manual_boxes = gr.Textbox(
-                            label="Manual boxes (x1,y1,x2,y2 per line)",
+                            label="Box coords (x1,y1,x2,y2 per line, 0–1 or pixels)",
                             placeholder="0.30,0.10,0.70,0.60\n0.10,0.55,0.95,0.95",
                             lines=3, value="", elem_id="v2-manual-boxes",
                         )
@@ -1315,10 +1436,14 @@ def build_ui():
                             gr.Examples(examples=[[p] for p in sample_imgs], inputs=still,
                                         label=None, examples_per_page=6, elem_id="sample-gallery")
 
-                        gr.HTML('<div class="gd-panel-title" style="margin-top:14px">④ VOCABULARY</div>')
+                        gr.HTML('<div class="gd-panel-title" style="margin-top:14px">④ OBJECT CLASSES &amp; PREDICATES</div>')
+                        gr.HTML(
+                            '<div style="font-size:10px;color:#64748b;margin-bottom:6px;font-family:Inter,sans-serif">'
+                            '💡 Leave blank to use exam-optimised defaults. Only relevant classes are detected.</div>'
+                        )
                         classes_txt = gr.Textbox(
-                            label="Object classes",
-                            placeholder="person, book, phone, desk...",
+                            label="Object classes (comma-separated)",
+                            placeholder="person, hand, laptop, phone, book, desk, pen, bag...",
                             lines=2, value="",
                         )
                         preds_txt = gr.Textbox(
@@ -1327,7 +1452,7 @@ def build_ui():
                         )
                         vocab_msg = gr.Markdown(value="")
 
-                        gr.HTML('<div class="gd-panel-title" style="margin-top:4px">PRESETS</div>')
+                        gr.HTML('<div class="gd-panel-title" style="margin-top:4px">PREDICATE PRESETS</div>')
                         with gr.Row(elem_classes="preset-row"):
                             for pname in PREDICATE_PRESETS:
                                 def _handler(n=pname):
@@ -1337,14 +1462,14 @@ def build_ui():
                                     return h
                                 gr.Button(pname, size="sm").click(
                                     _handler(), [classes_txt], [preds_txt, vocab_msg])
-                        apply_btn = gr.Button("Apply Vocabularies", variant="primary",
+                        apply_btn = gr.Button("⚡ Apply Vocabularies", variant="primary",
                                               elem_classes="btn-primary")
                         apply_btn.click(apply_vocab, [classes_txt, preds_txt], vocab_msg)
 
                         gr.HTML('<div class="gd-panel-title" style="margin-top:14px">⑤ INFERENCE SETTINGS</div>')
-                        conf    = gr.Slider(0.05, 0.9,  0.25, step=0.05, label="Detector confidence")
-                        top_k   = gr.Slider(1,    30,   12,   step=1,    label="Max triplets")
-                        score_t = gr.Slider(0.0,  0.95, 0.30, step=0.05, label="Relation score threshold")
+                        conf    = gr.Slider(0.05, 0.9,  0.30, step=0.05, label="Detector confidence")
+                        top_k   = gr.Slider(1,    20,   10,   step=1,    label="Max triplets")
+                        score_t = gr.Slider(0.0,  0.95, 0.35, step=0.05, label="Relation score threshold")
 
             # ════════════════════════════════════════════════════════════
             # TAB 2 — TEMPORAL SCENE GRAPH & TIMELINE (LIKE DASHBOARD 1)
@@ -1443,8 +1568,12 @@ def build_ui():
         _inf_outputs = [out_img, stats_html, rel_all, rel_spa, rel_sem]
 
         still.change(dispatch_image, [still] + _inf_inputs, _inf_outputs)
-        cam.stream(dispatch_image, [cam] + _inf_inputs, _inf_outputs,
-                   stream_every=0.12, concurrency_limit=1, show_progress="hidden")
+        # Webcam streams to its own dedicated output — does NOT touch the Image tab output
+        _cam_outputs = [cam_out, stats_html, rel_all, rel_spa, rel_sem]
+        cam.stream(dispatch_image, [cam] + _inf_inputs, _cam_outputs,
+                   stream_every=0.15, concurrency_limit=1, show_progress="hidden")
+        # Stop webcam: clear the cam output and freeze the feed
+        cam_stop_btn.click(fn=lambda: None, inputs=None, outputs=[cam])
         for ctrl in [conf, top_k, score_t, label_mode, manual_boxes, draw_mode]:
             ctrl.change(dispatch_image, [still] + _inf_inputs, _inf_outputs)
 
@@ -1552,7 +1681,7 @@ def main():
     ap = argparse.ArgumentParser(description="GodsEye Dashboard v2")
     ap.add_argument("--ckpt",   default="model/model.pth")
     ap.add_argument("--det",    default="checkpoints/detectors/yoloe-11s-seg-pf.pt")
-    ap.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+    ap.add_argument("--device", default="cuda", choices=["cpu", "cuda"])
     ap.add_argument("--port",   type=int, default=7861)
     ap.add_argument("--share",  action="store_true")
     ap.add_argument("--no-pipeline", action="store_true",
@@ -1565,6 +1694,13 @@ def main():
         except Exception as e:
             print(f"[GodsEye v2] ⚠ pipeline load failed: {e}")
             print("[GodsEye v2]   Live Inference tab will be disabled. Use --no-pipeline to suppress this.")
+
+    # Show device in launch banner
+    import torch
+    dev_label = "CPU"
+    if torch.cuda.is_available():
+        dev_label = f"GPU · {torch.cuda.get_device_name(0)}"
+    print(f"[GodsEye v2] Running on: {dev_label}")
 
     build_ui().queue(max_size=4).launch(
         server_name="127.0.0.1",

@@ -8,7 +8,32 @@ Tested on: Ubuntu 22.04 · Anaconda · Python 3.12 · NVIDIA driver ≥ 550.
 
 ---
 
-## 0. TL;DR
+## ⚡ Universal Automated Setup (Any PC)
+
+We provide an automated setup engine that detects your hardware (NVIDIA GPU, Apple Silicon MPS, or CPU), configures CUDA-accelerated PyTorch automatically, installs all dependencies, and downloads missing models:
+
+### Windows:
+```cmd
+setup.bat
+run_dashboard.bat
+```
+
+### Linux / macOS:
+```bash
+chmod +x setup.sh run_dashboard.sh
+./setup.sh
+./run_dashboard.sh
+```
+
+### Or Python CLI:
+```bash
+python setup_env.py
+python run_dashboard_v2.py
+```
+
+---
+
+## 0. Manual Conda TL;DR
 
 If you just want it running:
 
