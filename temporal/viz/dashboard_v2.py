@@ -1531,8 +1531,15 @@ def build_ui():
             if not runs:
                 return gr.update(), None, None, None, "No runs found in outputs/.", _ph("No relations."), _ph("No runs."), _ph("No runs."), _ph("No runs.")
             default_run = runs[0]
-            slider, tl, img, sg, status, chips, al, asum = load_run(default_run)
-            return slider, tl, img, sg, status, chips, al, asum, asum
+            try:
+                slider, tl, img, sg, status, chips, al, asum = load_run(default_run)
+                return slider, tl, img, sg, status, chips, al, asum, asum
+            except Exception as e:
+                print(f"[_init_page] could not load '{default_run}': {e}")
+                msg = "No run loaded — upload a video and click Process."
+                return (gr.update(), None, None, None, msg,
+                        _ph("No relations."), _ph("No runs."),
+                        _ph("No runs."), _ph("No runs."))
 
         demo.load(
             _init_page,
