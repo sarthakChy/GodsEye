@@ -86,3 +86,14 @@ footage/
 godseye_demo.mp4
 patch_*.py
 *.bak
+
+# DEVA preprocessing outputs (generated, ~500 MB per run)
+outputs/*/deva/
+
+# Third-party model checkpoints
+saves/
+*.pth
+*.pt
+
+# DEVA patch script is intentionally tracked
+!scripts/patch_deva.py
